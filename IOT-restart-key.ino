@@ -2,6 +2,7 @@
 //Using ESP32
 // v0.1 - initial release
 // v0.2 - Add wifi retry mechanism by auto-restart
+// v0.3 - Add the function key to generate a message
 
 #include <neotimer.h>           // Timer interrupt driver
 #include <ButtonDebounce.h>
@@ -11,7 +12,8 @@
 
 #define LED1 32
 #define TRIG 36
-#define ID 5
+#define FUNC_KEY 35
+#define ID 7
 
 
 // MQTT and WiFi set-up
@@ -21,15 +23,14 @@ Neotimer mytimer(900000); // Set timer interrupt to 15min
 
 // Key debounce set-up
 ButtonDebounce trigger(TRIG, 700);
+ButtonDebounce function_key(FUNC_KEY, 3000); //Long press 3 second
 
 //const char *ssid = "W001";      // Your SSID             
 //const char *password = "W001-Guest";  // Your Wifi password
-//const char *ssid = "U103";      // Your SSID             
-//const char *password = "IcU103wifi";  // Your Wifi password
 const char *ssid = "EIA-W311MESH";      // Your SSID             
 const char *password = "42004200";  // Your Wifi password
-//const char *mqtt_server = "mqtt.eclipse.org"; // MQTT server name
-const char *mqtt_server = "ia.ic.polyu.edu.hk"; // MQTT server name
+const char *mqtt_server = "mqtt.eclipse.org"; // MQTT server name
+//const char *mqtt_server = "ia.ic.polyu.edu.hk"; // MQTT server name
 char *mqttTopic = "IC/SENSOR";    
 
 byte reconnect_count = 0;
@@ -136,8 +137,32 @@ void buttonChanged(int state){
   }
 }
 
+void buttonChanged1(int state){
+  if (digitalRead(FUNC_KEY) == HIGH) {
+   //fast flash the LED for 3 times
+   for (int n = 1; n<=6; n++) {
+    digitalWrite(LED1,digitalRead(LED1)^1);
+    delay(250);
+   }
+
+   //send the special count value as detection of the key to server
+   Jsondata["COUNT"] = -1;
+   Serial.println("Function key is pressed");
+   count = 0;  //reset the counter
+
+   // Packing the JSON message into msg
+   serializeJson(Jsondata, Serial);
+   serializeJson(Jsondata, msg);
+      
+   //Publish msg to MQTT server
+   client.publish(mqttTopic, msg);
+   Serial.println();
+  }
+}
+
 void setup() {
-  pinMode(TRIG, INPUT_PULLUP);
+  pinMode(TRIG, INPUT);
+  pinMode(FUNC_KEY, INPUT);
   pinMode(LED1, OUTPUT);
 
   digitalWrite(LED1, LOW);
@@ -146,6 +171,7 @@ void setup() {
   Serial.println("System Start!");  
 
   trigger.setCallback(buttonChanged);
+  function_key.setCallback(buttonChanged1);
 
   setup_wifi();
   client.setServer(mqtt_server, 1883);
@@ -154,11 +180,11 @@ void setup() {
   //Initalize Json message
   Jsondata["hand_id"] = ID;
   Jsondata["COUNT"] = 0; 
-  //Jsondata["ACK"] = 1;
 }
 
 void loop() {
    trigger.update();
+   function_key.update();
    
    if (!client.connected()){
     reconnect();
@@ -171,8 +197,7 @@ void loop() {
       
       //Sending "alive" message to server regularly
       Jsondata["hand_id"] = ID;
-      Jsondata["COUNT"] = 0; 
-      Jsondata["ACK"] = 1;
+      Jsondata["COUNT"] = -2; 
       // Packing the JSON message into msg
       serializeJson(Jsondata, Serial);
       serializeJson(Jsondata, msg);
