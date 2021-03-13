@@ -3,6 +3,8 @@
 // v0.1 - initial release
 // v0.2 - Add wifi retry mechanism by auto-restart
 // v0.3 - Add the function key to generate a message
+// v0.4 - correct the method to detect the key longpress
+// Every unit has an unique ID# and need to check WiFi SSID and PW
 
 #include <neotimer.h>           // Timer interrupt driver
 #include <ButtonDebounce.h>
@@ -13,7 +15,7 @@
 #define LED1 32
 #define TRIG 36
 #define FUNC_KEY 35
-#define ID 7
+#define ID 10
 
 
 // MQTT and WiFi set-up
@@ -22,20 +24,40 @@ PubSubClient client(espClient);
 Neotimer mytimer(900000); // Set timer interrupt to 15min
 
 // Key debounce set-up
-ButtonDebounce trigger(TRIG, 700);
-ButtonDebounce function_key(FUNC_KEY, 3000); //Long press 3 second
+ButtonDebounce trigger(TRIG, 100);//IO debouncing
+ButtonDebounce function_key(FUNC_KEY, 100); //IO debouncing
 
-//const char *ssid = "W001";      // Your SSID             
+//const char *ssid = "ap_u401";      // Your SSID             
+//const char *password = "machine4320";  // Your Wifi password
+
+//const char *ssid = "W001-Guest";      // Your SSID             
 //const char *password = "W001-Guest";  // Your Wifi password
-const char *ssid = "EIA-W311MESH";      // Your SSID             
-const char *password = "42004200";  // Your Wifi password
-const char *mqtt_server = "mqtt.eclipse.org"; // MQTT server name
-//const char *mqtt_server = "ia.ic.polyu.edu.hk"; // MQTT server name
+
+const char *ssid = "U103";      // Your SSID             
+const char *password = "IcU103wifi";  // Your Wifi password
+
+//const char *ssid = "EiA-Mbot"; 
+//const char *password = "42004200";  // Your Wifi password
+
+//const char *ssid = "icw502g"; 
+//const char *password = "8c122ase";  // Your Wifi password
+
+//const char *ssid = "EIA-W311MESH";      // Your SSID             
+//const char *password = "42004200";  // Your Wifi password
+
+//const char *mqtt_server = "mqtt.eclipse.org"; // MQTT server name
+const char *mqtt_server = "ia.ic.polyu.edu.hk"; // MQTT server name
 char *mqttTopic = "IC/SENSOR";    
 
 byte reconnect_count = 0;
 int count = 0;
-long int currentTime = 0;
+long currentTime = 0;
+
+boolean keyactive = false;
+boolean longkeypress = false;
+
+unsigned long keytimer = 0;
+unsigned long longpresstime = 2000;//2 second
 
 char msg[200];
 String ipAddress;
@@ -139,24 +161,15 @@ void buttonChanged(int state){
 
 void buttonChanged1(int state){
   if (digitalRead(FUNC_KEY) == HIGH) {
-   //fast flash the LED for 3 times
-   for (int n = 1; n<=6; n++) {
-    digitalWrite(LED1,digitalRead(LED1)^1);
-    delay(250);
-   }
-
-   //send the special count value as detection of the key to server
-   Jsondata["COUNT"] = -1;
-   Serial.println("Function key is pressed");
-   count = 0;  //reset the counter
-
-   // Packing the JSON message into msg
-   serializeJson(Jsondata, Serial);
-   serializeJson(Jsondata, msg);
-      
-   //Publish msg to MQTT server
-   client.publish(mqttTopic, msg);
-   Serial.println();
+    if (keyactive == false){
+      keyactive = true;
+      keytimer = millis();
+      Serial.println("key is active!!");
+    }
+  }
+  else {
+    keyactive = false;
+    longkeypress = false;
   }
 }
 
@@ -180,6 +193,7 @@ void setup() {
   //Initalize Json message
   Jsondata["hand_id"] = ID;
   Jsondata["COUNT"] = 0; 
+  //Jsondata["ACK"] = 1;
 }
 
 void loop() {
@@ -190,6 +204,30 @@ void loop() {
     reconnect();
    }
    client.loop();
+
+   if ((millis()-keytimer > longpresstime) && (keyactive == true) && (longkeypress ==false)){
+      longkeypress = true;
+      //fast flash the LED for 3 times
+      for (int n = 1; n<=6; n++) {
+        digitalWrite(LED1,digitalRead(LED1)^1);
+        delay(250);
+      }
+
+      //send the special count value as detection of the key to server
+      count = 0;
+      Jsondata["COUNT"] = count;
+      Serial.println("Function key is pressed");
+      count = 0;  //reset the counter
+
+      // Packing the JSON message into msg
+      serializeJson(Jsondata, Serial);
+      serializeJson(Jsondata, msg);
+      
+      //Publish msg to MQTT server
+      client.publish(mqttTopic, msg);
+      Serial.println();
+      keyactive = false; //reset key status
+   }
 
    /*//Use Timer Interrupt to repeat the following task regularly
    if(mytimer.repeat()){  
